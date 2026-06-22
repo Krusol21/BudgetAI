@@ -1,38 +1,70 @@
-# BudgetAI — College Budget Assistant
+# BudgetAI
 
-A full-stack agentic budgeting app. Upload your bank CSV, let Claude categorize every transaction, ask questions in plain English, and get forecasts for your month-end balance.
+A full-stack AI-powered personal finance app for college students. Upload bank statements, track spending across categories, ask questions in plain English, and get AI-generated forecasts — all powered by Claude (Anthropic).
+
+Built as a personal project to explore applied AI, full-stack web development, and real-world tool use patterns with large language models.
 
 ---
 
-## Quick Start
+## Features
 
-### 1. Get a Claude API key
+| | |
+|---|---|
+| **CSV Import** | Drag-and-drop bank statement upload with auto-detection of Chase, Bank of America, Capital One, Fidelity, Amex, and any standard CSV format |
+| **AI Categorization** | Every transaction is automatically categorized by Claude Haiku |
+| **AI Chat Agent** | Ask questions like "Can I afford a weekend trip?" — Claude Sonnet uses live budget data via tool use to answer accurately |
+| **Dashboard** | Spending donut chart, daily bar chart, budget progress bars, and a parental budget summary card |
+| **Forecast** | Projected month-end balance based on current daily spending rate, with per-category risk flags |
+| **Budget Manager** | Create, edit, and delete monthly spending limits per category |
+| **Parents' Annual Budget** | Track an annual budget from a third party — supports credit card CSV upload, plus manual entry for rent and utilities |
+| **Duplicate Detection** | Re-uploading an overlapping statement skips already-imported transactions automatically |
 
-The app uses the Claude API directly — this is separate from your Claude Pro subscription and billed per-use (expect under $1/month for personal budgeting).
+---
 
-1. Go to **[console.anthropic.com](https://console.anthropic.com)** and sign in with your Anthropic account
-2. Navigate to **API Keys** → **Create Key** — copy it somewhere safe, it's only shown once
-3. Go to **Billing** → add a payment method (pay-as-you-go, no commitment)
+## Tech Stack
 
-### 2. Clone / navigate to this folder
+**Backend**
+- Node.js + Express
+- SQLite via [sql.js](https://github.com/sql-js/sql-js) (WebAssembly — no native compilation required)
+- JWT authentication
+- [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-node)
 
+**Frontend**
+- React + Vite
+- Tailwind CSS
+- Recharts
+
+**AI**
+- Claude Haiku — transaction categorization
+- Claude Sonnet — conversational agent with agentic tool use (budget state, transaction lookup, forecasting, reallocation suggestions)
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- [Node.js v22 LTS](https://nodejs.org)
+- An [Anthropic API key](https://console.anthropic.com) (pay-as-you-go; typical usage runs under $1/month)
+
+### Installation
+
+```bash
+git clone https://github.com/Krusol21/BudgetAI.git
+cd BudgetAI
 ```
-cd BUDGET_WORKFLOW
-```
 
-### 3. Set up the backend
-
-```powershell
+**Backend:**
+```bash
 cd backend
 npm install
-Copy-Item .env.example .env
+cp .env.example .env
 ```
 
-Open `.env` and fill in both values:
-
+Open `.env` and fill in:
 ```
-ANTHROPIC_API_KEY=sk-ant-...        # paste your key from step 1
-JWT_SECRET=...                       # generate one with the command below
+ANTHROPIC_API_KEY=your_key_here
+JWT_SECRET=your_jwt_secret_here
 ```
 
 Generate a JWT secret:
@@ -40,77 +72,56 @@ Generate a JWT secret:
 node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
 
+**Frontend:**
 ```bash
-npm run dev
-```
-
-Backend runs on `http://localhost:3001`.
-
-### 4. Set up the frontend
-
-```bash
-cd frontend
+cd ../frontend
 npm install
-npm run dev
 ```
 
-Frontend runs on `http://localhost:5173`. Open that in your browser.
+### Running
+
+On Windows, double-click `start-budgetai.bat` — it starts both servers and opens the app in your browser.
+
+Or manually:
+```bash
+# terminal 1
+cd backend && npm run dev
+
+# terminal 2
+cd frontend && npm run dev
+```
+
+App runs at `http://localhost:5173`.
 
 ---
 
-## Features
+## Project Structure
 
-| Feature | Description |
-|---|---|
-| **CSV Upload** | Export from any major bank, drag & drop, AI auto-categorizes |
-| **AI Chat** | Ask "Can I afford a $300 textbook?" in plain English |
-| **Dashboard** | Spending by category (donut chart) + daily bar chart + budget progress |
-| **Forecast** | Projected month-end balance with risk flags per category |
-| **Budget Manager** | Set/edit/delete monthly limits per category |
-| **Transactions** | Full list with category override, pagination, delete |
-
----
-
-## How to export your bank CSV
-
-| Bank | Steps |
-|---|---|
-| Chase | Accounts → Download Account Activity → CSV |
-| Bank of America | Accounts → Download → Date range → CSV |
-| Capital One | Transactions → Download → CSV |
-| Wells Fargo | Accounts → Download Account Activity → CSV |
-| Discover | Statements & Activity → Download → CSV |
-
----
-
-## Tech Stack
-
-- **Backend:** Node.js + Express, SQLite (better-sqlite3), JWT auth
-- **AI:** Claude Sonnet (chat/forecast) + Claude Haiku (categorization)
-- **Frontend:** React + Vite + Tailwind CSS + Recharts
-- **Hosting:** Deploy backend to Railway/Render free tier, frontend to Vercel
+```
+BudgetAI/
+├── backend/
+│   ├── agent/
+│   │   ├── tools.js        # Claude tool definitions + agentic loop
+│   │   └── snapshot.js     # Auto-generates budget-snapshot.md on every data change
+│   ├── routes/
+│   │   ├── transactions.js # CSV upload, parsing, categorization
+│   │   ├── budgets.js      # Monthly budget CRUD
+│   │   ├── parentalBudget.js
+│   │   ├── agent.js        # Chat endpoint
+│   │   └── auth.js
+│   ├── database.js         # sql.js init, migrations, disk persistence
+│   └── server.js
+├── frontend/
+│   └── src/
+│       └── components/     # Dashboard, UploadPage, ChatInterface, etc.
+├── budget-snapshot.md      # Human-readable live budget view (auto-generated)
+└── start-budgetai.bat
+```
 
 ---
 
-## Deployment (free)
+## How It Works
 
-### Backend → Railway
-1. Push `backend/` to a GitHub repo
-2. Connect to [railway.app](https://railway.app) → New Project → Deploy from GitHub
-3. Add environment variables (ANTHROPIC_API_KEY, JWT_SECRET)
-4. Set start command: `node server.js`
+The AI agent uses Claude's tool use API in an agentic loop. When you send a message, Claude decides which tools to call — querying live transaction data, budget limits, forecasts, or reallocation suggestions — before composing a response. This means answers are always grounded in your real numbers, not hallucinated.
 
-### Frontend → Vercel
-1. Push `frontend/` to GitHub
-2. Connect to [vercel.com](https://vercel.com) → New Project
-3. Set `VITE_API_URL` if needed, update `vite.config.js` proxy to point to your Railway URL
-
----
-
-## Cost
-
-$0/month using free tiers:
-- Railway/Render: free tier (backend)
-- Vercel: free tier (frontend)
-- SQLite: local file, no cost
-- Anthropic API: ~$0.50–$1/month typical usage (Claude Haiku for categorization, Sonnet for chat)
+A `budget-snapshot.md` file is written to disk after every data change, giving a human-readable view of your current budget state at any time without opening the app.
