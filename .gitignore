@@ -11,6 +11,9 @@ frontend/dist/
 
 # Database (stored outside project folder anyway, but just in case)
 *.db
+
+# Auto-generated snapshot — contains personal financial data
+budget-snapshot.md
 *.db-shm
 *.db-wal
 
