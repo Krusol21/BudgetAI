@@ -26,7 +26,7 @@ Built as a personal project to practice automating workflows, using AI intention
 - Node.js + Express
 - SQLite via [sql.js](https://github.com/sql-js/sql.js) (WebAssembly — no native compilation required)
 - JWT authentication
-- [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-node-js)
+- [Anthropic SDK](https://www.npmjs.com/package/@anthropic-ai/sdk)
 
 **Frontend**
 - React + Vite
