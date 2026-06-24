@@ -2,7 +2,7 @@
 
 A full-stack AI-powered personal finance app for college students. Upload bank statements, track spending across categories, ask questions in plain English, and get AI-generated forecasts — all powered by Claude (Anthropic).
 
-Built as a personal project to explore applied AI, full-stack web development, and real-world tool use patterns with large language models.
+Built as a personal project to practice automating workflows, using AI intentionally and responsibly.
 
 ---
 
@@ -16,7 +16,6 @@ Built as a personal project to explore applied AI, full-stack web development, a
 | **Dashboard** | Spending donut chart, daily bar chart, budget progress bars, and a parental budget summary card |
 | **Forecast** | Projected month-end balance based on current daily spending rate, with per-category risk flags |
 | **Budget Manager** | Create, edit, and delete monthly spending limits per category |
-| **Parents' Annual Budget** | Track an annual budget from a third party — supports credit card CSV upload, plus manual entry for rent and utilities |
 | **Duplicate Detection** | Re-uploading an overlapping statement skips already-imported transactions automatically |
 
 ---
