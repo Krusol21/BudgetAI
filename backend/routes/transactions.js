@@ -58,7 +58,6 @@ function parseCSV(buffer) {
 
   if (!dateKey || !descKey) throw new Error('Could not detect Date or Description columns in CSV');
 
-  // Amex (and some other credit cards) export positive = charge, negative = payment/credit
   const isAmexStyle = cols.some(c => ['extended details', 'appears on your statement as'].includes(c));
 
   return records.map(row => {
@@ -98,7 +97,7 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
     const db = getDb();
     const fundingSource = req.body.funding_source === 'parental' ? 'parental' : 'personal';
 
-    const budgets = db.prepare('SELECT category FROM budgets WHERE user_id = ?').all([req.userId]);
+    const budgets = await db.prepare('SELECT category FROM budgets WHERE user_id = ?').all([req.userId]);
     const categories = budgets.map(b => b.category);
 
     const results = [];
@@ -115,8 +114,8 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
         .update(`${req.userId}|${date}|${row.description}|${row.amount}`)
         .digest('hex');
 
-      db.prepare(
-        'INSERT OR IGNORE INTO transactions (id, user_id, date, amount, description, category, is_expense, funding_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      await db.prepare(
+        'INSERT INTO transactions (id, user_id, date, amount, description, category, is_expense, funding_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING'
       ).run([id, req.userId, date, row.amount, row.description, category, row.isExpense ? 1 : 0, fundingSource]);
 
       results.push({ id, date, amount: row.amount, description: row.description, category, isExpense: row.isExpense, fundingSource });
@@ -129,74 +128,90 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
   }
 });
 
-router.get('/', (req, res) => {
-  const { limit = 50, offset = 0, category, startDate, endDate } = req.query;
-  const db = getDb();
+router.get('/', async (req, res, next) => {
+  try {
+    const { limit = 50, offset = 0, category, startDate, endDate } = req.query;
+    const db = getDb();
 
-  let query = 'SELECT * FROM transactions WHERE user_id = ?';
-  const params = [req.userId];
+    let query = 'SELECT * FROM transactions WHERE user_id = ?';
+    const params = [req.userId];
 
-  if (category) { query += ' AND category = ?'; params.push(category); }
-  if (startDate) { query += ' AND date >= ?'; params.push(startDate); }
-  if (endDate) { query += ' AND date <= ?'; params.push(endDate); }
+    if (category) { query += ' AND category = ?'; params.push(category); }
+    if (startDate) { query += ' AND date >= ?'; params.push(startDate); }
+    if (endDate) { query += ' AND date <= ?'; params.push(endDate); }
 
-  query += ' ORDER BY date DESC, created_at DESC LIMIT ? OFFSET ?';
-  params.push(Number(limit), Number(offset));
+    query += ' ORDER BY date DESC, created_at DESC LIMIT ? OFFSET ?';
+    params.push(Number(limit), Number(offset));
 
-  const transactions = db.prepare(query).all(params);
-  const total = db.prepare('SELECT COUNT(*) as count FROM transactions WHERE user_id = ?').get([req.userId]).count;
+    const transactions = await db.prepare(query).all(params);
+    const countRow = await db.prepare('SELECT COUNT(*) as count FROM transactions WHERE user_id = ?').get([req.userId]);
 
-  res.json({ transactions, total });
+    res.json({ transactions, total: Number(countRow.count) });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.put('/:id/category', (req, res) => {
-  const { category } = req.body;
-  if (!category) return res.status(400).json({ error: 'category required' });
+router.put('/:id/category', async (req, res, next) => {
+  try {
+    const { category } = req.body;
+    if (!category) return res.status(400).json({ error: 'category required' });
 
-  const db = getDb();
-  const result = db.prepare(
-    'UPDATE transactions SET category = ? WHERE id = ? AND user_id = ?'
-  ).run([category, req.params.id, req.userId]);
+    const db = getDb();
+    const result = await db.prepare(
+      'UPDATE transactions SET category = ? WHERE id = ? AND user_id = ?'
+    ).run([category, req.params.id, req.userId]);
 
-  if (result.changes === 0) return res.status(404).json({ error: 'Transaction not found' });
-  syncSnapshot(req.userId);
-  res.json({ success: true });
+    if (result.changes === 0) return res.status(404).json({ error: 'Transaction not found' });
+    syncSnapshot(req.userId);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.delete('/:id', (req, res) => {
-  const db = getDb();
-  const result = db.prepare('DELETE FROM transactions WHERE id = ? AND user_id = ?').run([req.params.id, req.userId]);
-  if (result.changes === 0) return res.status(404).json({ error: 'Transaction not found' });
-  syncSnapshot(req.userId);
-  res.json({ success: true });
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const db = getDb();
+    const result = await db.prepare('DELETE FROM transactions WHERE id = ? AND user_id = ?').run([req.params.id, req.userId]);
+    if (result.changes === 0) return res.status(404).json({ error: 'Transaction not found' });
+    syncSnapshot(req.userId);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.get('/summary', (req, res) => {
-  const db = getDb();
-  const now = new Date();
-  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+router.get('/summary', async (req, res, next) => {
+  try {
+    const db = getDb();
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 
-  const monthly = db.prepare(`
-    SELECT category, SUM(amount) as total, COUNT(*) as count
-    FROM transactions
-    WHERE user_id = ? AND date >= ? AND is_expense = 1
-    GROUP BY category ORDER BY total DESC
-  `).all([req.userId, monthStart]);
+    const monthly = await db.prepare(`
+      SELECT category, SUM(amount) as total, COUNT(*) as count
+      FROM transactions
+      WHERE user_id = ? AND date >= ? AND is_expense = 1
+      GROUP BY category ORDER BY total DESC
+    `).all([req.userId, monthStart]);
 
-  const daily = db.prepare(`
-    SELECT date, SUM(amount) as total
-    FROM transactions
-    WHERE user_id = ? AND date >= ? AND is_expense = 1
-    GROUP BY date ORDER BY date ASC
-  `).all([req.userId, monthStart]);
+    const daily = await db.prepare(`
+      SELECT date, SUM(amount) as total
+      FROM transactions
+      WHERE user_id = ? AND date >= ? AND is_expense = 1
+      GROUP BY date ORDER BY date ASC
+    `).all([req.userId, monthStart]);
 
-  const totalSpent = monthly.reduce((s, r) => s + r.total, 0);
-  const totalIncome = db.prepare(`
-    SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-    WHERE user_id = ? AND date >= ? AND is_expense = 0
-  `).get([req.userId, monthStart]).total;
+    const totalSpent = monthly.reduce((s, r) => s + Number(r.total), 0);
+    const incomeRow = await db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total FROM transactions
+      WHERE user_id = ? AND date >= ? AND is_expense = 0
+    `).get([req.userId, monthStart]);
 
-  res.json({ monthly, daily, totalSpent, totalIncome });
+    res.json({ monthly, daily, totalSpent, totalIncome: Number(incomeRow.total) });
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;

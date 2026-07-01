@@ -7,38 +7,38 @@ const { syncSnapshot } = require('../agent/snapshot');
 const router = express.Router();
 router.use(authenticate);
 
-router.get('/summary', (req, res, next) => {
+router.get('/summary', async (req, res, next) => {
   try {
     const db = getDb();
     const year = new Date().getFullYear();
     const yearPrefix = `${year}-%`;
 
-    const budget = db.prepare(
+    const budget = await db.prepare(
       'SELECT annual_limit FROM parental_budgets WHERE user_id = ? AND year = ?'
     ).get([req.userId, year]);
 
-    const ccRow = db.prepare(
+    const ccRow = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
        WHERE user_id = ? AND funding_source = 'parental' AND is_expense = 1 AND date LIKE ?`
     ).get([req.userId, yearPrefix]);
 
-    const manualRows = db.prepare(
+    const manualRows = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries
        WHERE user_id = ? AND month LIKE ?`
     ).get([req.userId, yearPrefix]);
 
-    const rentRow = db.prepare(
+    const rentRow = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries
        WHERE user_id = ? AND category = 'Rent' AND month LIKE ?`
     ).get([req.userId, yearPrefix]);
 
-    const utilitiesRow = db.prepare(
+    const utilitiesRow = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries
        WHERE user_id = ? AND category = 'Utilities' AND month LIKE ?`
     ).get([req.userId, yearPrefix]);
 
-    const creditCardSpent = ccRow ? ccRow.total : 0;
-    const manualSpent = manualRows ? manualRows.total : 0;
+    const creditCardSpent = ccRow ? Number(ccRow.total) : 0;
+    const manualSpent = manualRows ? Number(manualRows.total) : 0;
     const totalSpent = creditCardSpent + manualSpent;
     const annualLimit = budget ? budget.annual_limit : null;
 
@@ -49,8 +49,8 @@ router.get('/summary', (req, res, next) => {
       remaining: annualLimit !== null ? annualLimit - totalSpent : null,
       breakdown: {
         creditCard: creditCardSpent,
-        rent: rentRow ? rentRow.total : 0,
-        utilities: utilitiesRow ? utilitiesRow.total : 0,
+        rent: rentRow ? Number(rentRow.total) : 0,
+        utilities: utilitiesRow ? Number(utilitiesRow.total) : 0,
       },
     });
   } catch (err) {
@@ -58,7 +58,7 @@ router.get('/summary', (req, res, next) => {
   }
 });
 
-router.post('/setup', (req, res, next) => {
+router.post('/setup', async (req, res, next) => {
   try {
     const { annual_limit, year } = req.body;
     if (!annual_limit || isNaN(annual_limit) || annual_limit <= 0) {
@@ -67,15 +67,15 @@ router.post('/setup', (req, res, next) => {
     const db = getDb();
     const targetYear = year || new Date().getFullYear();
 
-    const existing = db.prepare(
+    const existing = await db.prepare(
       'SELECT id FROM parental_budgets WHERE user_id = ? AND year = ?'
     ).get([req.userId, targetYear]);
 
     if (existing) {
-      db.prepare('UPDATE parental_budgets SET annual_limit = ? WHERE user_id = ? AND year = ?')
+      await db.prepare('UPDATE parental_budgets SET annual_limit = ? WHERE user_id = ? AND year = ?')
         .run([annual_limit, req.userId, targetYear]);
     } else {
-      db.prepare('INSERT INTO parental_budgets (id, user_id, annual_limit, year) VALUES (?, ?, ?, ?)')
+      await db.prepare('INSERT INTO parental_budgets (id, user_id, annual_limit, year) VALUES (?, ?, ?, ?)')
         .run([uuidv4(), req.userId, annual_limit, targetYear]);
     }
 
@@ -86,10 +86,10 @@ router.post('/setup', (req, res, next) => {
   }
 });
 
-router.get('/manual-entries', (req, res, next) => {
+router.get('/manual-entries', async (req, res, next) => {
   try {
     const db = getDb();
-    const entries = db.prepare(
+    const entries = await db.prepare(
       'SELECT * FROM parental_manual_entries WHERE user_id = ? ORDER BY month DESC, created_at DESC'
     ).all([req.userId]);
     res.json({ entries });
@@ -98,7 +98,7 @@ router.get('/manual-entries', (req, res, next) => {
   }
 });
 
-router.post('/manual-entries', (req, res, next) => {
+router.post('/manual-entries', async (req, res, next) => {
   try {
     const { amount, category, month, description } = req.body;
     if (!amount || isNaN(amount) || amount <= 0) {
@@ -113,7 +113,7 @@ router.post('/manual-entries', (req, res, next) => {
 
     const db = getDb();
     const id = uuidv4();
-    db.prepare(
+    await db.prepare(
       'INSERT INTO parental_manual_entries (id, user_id, amount, category, month, description) VALUES (?, ?, ?, ?, ?, ?)'
     ).run([id, req.userId, amount, category, month, description || null]);
 
@@ -124,10 +124,10 @@ router.post('/manual-entries', (req, res, next) => {
   }
 });
 
-router.delete('/manual-entries/:id', (req, res, next) => {
+router.delete('/manual-entries/:id', async (req, res, next) => {
   try {
     const db = getDb();
-    const result = db.prepare(
+    const result = await db.prepare(
       'DELETE FROM parental_manual_entries WHERE id = ? AND user_id = ?'
     ).run([req.params.id, req.userId]);
 

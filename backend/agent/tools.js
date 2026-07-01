@@ -69,21 +69,21 @@ const TOOLS = [
   },
 ];
 
-function executeTool(userId, toolName, toolInput) {
+async function executeTool(userId, toolName, toolInput) {
   const db = getDb();
   const now = new Date();
 
   switch (toolName) {
     case 'get_budget_state': {
       const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-      const budgets = db.prepare('SELECT * FROM budgets WHERE user_id = ?').all([userId]);
-      const spending = db.prepare(`
+      const budgets = await db.prepare('SELECT * FROM budgets WHERE user_id = ?').all([userId]);
+      const spending = await db.prepare(`
         SELECT category, SUM(amount) as spent
         FROM transactions WHERE user_id = ? AND date >= ? AND is_expense = 1
         GROUP BY category
       `).all([userId, monthStart]);
       const spendMap = {};
-      for (const s of spending) spendMap[s.category] = s.spent;
+      for (const s of spending) spendMap[s.category] = Number(s.spent);
 
       return budgets.map(b => ({
         category: b.category,
@@ -111,19 +111,22 @@ function executeTool(userId, toolName, toolInput) {
       const dayOfMonth = now.getDate();
       const daysRemaining = daysInMonth - dayOfMonth;
 
-      const spentThisMonth = db.prepare(`
+      const spentRow = await db.prepare(`
         SELECT COALESCE(SUM(amount), 0) as total FROM transactions
         WHERE user_id = ? AND date >= ? AND is_expense = 1
-      `).get([userId, monthStart]).total;
+      `).get([userId, monthStart]);
 
-      const incomeThisMonth = db.prepare(`
+      const incomeRow = await db.prepare(`
         SELECT COALESCE(SUM(amount), 0) as total FROM transactions
         WHERE user_id = ? AND date >= ? AND is_expense = 0
-      `).get([userId, monthStart]).total;
+      `).get([userId, monthStart]);
 
+      const budgetRow = await db.prepare('SELECT SUM(budget_limit) as total FROM budgets WHERE user_id = ?').get([userId]);
+
+      const spentThisMonth = Number(spentRow.total);
+      const incomeThisMonth = Number(incomeRow.total);
       const dailyRate = spentThisMonth / Math.max(dayOfMonth, 1);
       const projectedAdditionalSpend = dailyRate * daysRemaining;
-      const budgets = db.prepare('SELECT SUM(budget_limit) as total FROM budgets WHERE user_id = ?').get([userId]);
 
       return {
         monthStart,
@@ -135,20 +138,20 @@ function executeTool(userId, toolName, toolInput) {
         dailySpendRate: Math.round(dailyRate * 100) / 100,
         projectedAdditionalSpend: Math.round(projectedAdditionalSpend * 100) / 100,
         projectedMonthTotal: Math.round((spentThisMonth + projectedAdditionalSpend) * 100) / 100,
-        totalBudgetLimit: Math.round((budgets.total || 0) * 100) / 100,
+        totalBudgetLimit: Math.round((Number(budgetRow.total) || 0) * 100) / 100,
         estimatedMonthlyIncome: toolInput.monthly_income || null,
       };
     }
 
     case 'suggest_reallocation': {
       const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-      const budgets = db.prepare('SELECT * FROM budgets WHERE user_id = ?').all([userId]);
-      const spending = db.prepare(`
+      const budgets = await db.prepare('SELECT * FROM budgets WHERE user_id = ?').all([userId]);
+      const spending = await db.prepare(`
         SELECT category, SUM(amount) as spent FROM transactions
         WHERE user_id = ? AND date >= ? AND is_expense = 1 GROUP BY category
       `).all([userId, monthStart]);
       const spendMap = {};
-      for (const s of spending) spendMap[s.category] = s.spent;
+      for (const s of spending) spendMap[s.category] = Number(s.spent);
 
       const withSlack = budgets
         .map(b => ({ category: b.category, limit: b.budget_limit, spent: spendMap[b.category] || 0, slack: b.budget_limit - (spendMap[b.category] || 0) }))
@@ -176,13 +179,13 @@ function executeTool(userId, toolName, toolInput) {
     case 'get_parental_budget': {
       const year = now.getFullYear();
       const yearPrefix = `${year}-%`;
-      const budget = db.prepare('SELECT annual_limit FROM parental_budgets WHERE user_id = ? AND year = ?').get([userId, year]);
-      const ccRow = db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE user_id = ? AND funding_source = 'parental' AND is_expense = 1 AND date LIKE ?`).get([userId, yearPrefix]);
-      const manualRow = db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries WHERE user_id = ? AND month LIKE ?`).get([userId, yearPrefix]);
-      const rentRow = db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries WHERE user_id = ? AND category = 'Rent' AND month LIKE ?`).get([userId, yearPrefix]);
-      const utilRow = db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries WHERE user_id = ? AND category = 'Utilities' AND month LIKE ?`).get([userId, yearPrefix]);
-      const creditCardSpent = ccRow ? ccRow.total : 0;
-      const manualSpent = manualRow ? manualRow.total : 0;
+      const budget = await db.prepare('SELECT annual_limit FROM parental_budgets WHERE user_id = ? AND year = ?').get([userId, year]);
+      const ccRow = await db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE user_id = ? AND funding_source = 'parental' AND is_expense = 1 AND date LIKE ?`).get([userId, yearPrefix]);
+      const manualRow = await db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries WHERE user_id = ? AND month LIKE ?`).get([userId, yearPrefix]);
+      const rentRow = await db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries WHERE user_id = ? AND category = 'Rent' AND month LIKE ?`).get([userId, yearPrefix]);
+      const utilRow = await db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries WHERE user_id = ? AND category = 'Utilities' AND month LIKE ?`).get([userId, yearPrefix]);
+      const creditCardSpent = ccRow ? Number(ccRow.total) : 0;
+      const manualSpent = manualRow ? Number(manualRow.total) : 0;
       const totalSpent = creditCardSpent + manualSpent;
       const annualLimit = budget ? budget.annual_limit : null;
       return {
@@ -193,8 +196,8 @@ function executeTool(userId, toolName, toolInput) {
         percentUsed: annualLimit ? Math.round((totalSpent / annualLimit) * 100) : null,
         breakdown: {
           creditCard: Math.round(creditCardSpent * 100) / 100,
-          rent: rentRow ? Math.round(rentRow.total * 100) / 100 : 0,
-          utilities: utilRow ? Math.round(utilRow.total * 100) / 100 : 0,
+          rent: rentRow ? Math.round(Number(rentRow.total) * 100) / 100 : 0,
+          utilities: utilRow ? Math.round(Number(utilRow.total) * 100) / 100 : 0,
         },
       };
     }
@@ -239,7 +242,7 @@ async function runAgent(userId, conversationHistory) {
 
   while (response.stop_reason === 'tool_use') {
     const toolUseBlock = response.content.find(b => b.type === 'tool_use');
-    const toolResult = executeTool(userId, toolUseBlock.name, toolUseBlock.input);
+    const toolResult = await executeTool(userId, toolUseBlock.name, toolUseBlock.input);
 
     messages.push({ role: 'assistant', content: response.content });
     messages.push({

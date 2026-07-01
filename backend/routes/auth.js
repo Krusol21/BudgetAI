@@ -17,14 +17,13 @@ router.post('/register', async (req, res, next) => {
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
     const db = getDb();
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get([email.toLowerCase()]);
+    const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get([email.toLowerCase()]);
     if (existing) return res.status(409).json({ error: 'Email already registered' });
 
     const hash = await bcrypt.hash(password, 12);
     const id = uuidv4();
-    db.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)').run([id, email.toLowerCase(), hash]);
+    await db.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)').run([id, email.toLowerCase(), hash]);
 
-    // Seed default budget categories
     const defaults = [
       { category: 'Groceries', limit: 250 },
       { category: 'Dining Out', limit: 100 },
@@ -35,10 +34,11 @@ router.post('/register', async (req, res, next) => {
       { category: 'Utilities', limit: 70 },
       { category: 'Miscellaneous', limit: 100 },
     ];
-    const insertBudget = db.prepare(
-      'INSERT OR IGNORE INTO budgets (id, user_id, category, budget_limit) VALUES (?, ?, ?, ?)'
-    );
-    for (const b of defaults) insertBudget.run([uuidv4(), id, b.category, b.limit]);
+    for (const b of defaults) {
+      await db.prepare(
+        'INSERT INTO budgets (id, user_id, category, budget_limit) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING'
+      ).run([uuidv4(), id, b.category, b.limit]);
+    }
 
     res.status(201).json({ token: signToken(id), email: email.toLowerCase() });
   } catch (err) {
@@ -52,7 +52,7 @@ router.post('/login', async (req, res, next) => {
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get([email.toLowerCase()]);
+    const user = await db.prepare('SELECT * FROM users WHERE email = ?').get([email.toLowerCase()]);
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const valid = await bcrypt.compare(password, user.password_hash);

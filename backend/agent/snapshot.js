@@ -13,7 +13,7 @@ function statusIcon(pct) {
   return '✅ On track';
 }
 
-function syncSnapshot(userId) {
+async function syncSnapshot(userId) {
   try {
     const db = getDb();
     const now = new Date();
@@ -21,14 +21,14 @@ function syncSnapshot(userId) {
     const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const updatedAt = now.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-    const budgets = db.prepare('SELECT * FROM budgets WHERE user_id = ? ORDER BY category').all([userId]);
-    const spending = db.prepare(`
+    const budgets = await db.prepare('SELECT * FROM budgets WHERE user_id = ? ORDER BY category').all([userId]);
+    const spending = await db.prepare(`
       SELECT category, SUM(amount) as spent
       FROM transactions WHERE user_id = ? AND date >= ? AND is_expense = 1
       GROUP BY category
     `).all([userId, monthStart]);
     const spendMap = {};
-    for (const s of spending) spendMap[s.category] = s.spent;
+    for (const s of spending) spendMap[s.category] = Number(s.spent);
 
     const budgetRows = budgets.map(b => {
       const spent = spendMap[b.category] || 0;
@@ -41,36 +41,40 @@ function syncSnapshot(userId) {
     const totalSpent = budgetRows.reduce((s, b) => s + b.spent, 0);
     const totalRemaining = totalBudget - totalSpent;
 
-    const transactions = db.prepare(`
+    const transactions = await db.prepare(`
       SELECT date, description, category, amount, is_expense
       FROM transactions WHERE user_id = ?
       ORDER BY date DESC, created_at DESC
       LIMIT 30
     `).all([userId]);
 
-    const income = db.prepare(`
+    const incomeRow = await db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total FROM transactions
       WHERE user_id = ? AND date >= ? AND is_expense = 0
-    `).get([userId, monthStart]).total;
+    `).get([userId, monthStart]);
+    const income = Number(incomeRow.total);
 
     const year = now.getFullYear();
     const yearPrefix = `${year}-%`;
-    const parentalBudget = db.prepare(
+    const parentalBudget = await db.prepare(
       'SELECT annual_limit FROM parental_budgets WHERE user_id = ? AND year = ?'
     ).get([userId, year]);
-    const parentalCCSpent = db.prepare(
+    const parentalCCRow = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
        WHERE user_id = ? AND funding_source = 'parental' AND is_expense = 1 AND date LIKE ?`
-    ).get([userId, yearPrefix]).total;
-    const parentalManualSpent = db.prepare(
+    ).get([userId, yearPrefix]);
+    const parentalManualRow = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries WHERE user_id = ? AND month LIKE ?`
-    ).get([userId, yearPrefix]).total;
-    const parentalRent = db.prepare(
+    ).get([userId, yearPrefix]);
+    const parentalRentRow = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries WHERE user_id = ? AND category = 'Rent' AND month LIKE ?`
-    ).get([userId, yearPrefix]).total;
-    const parentalUtilities = db.prepare(
+    ).get([userId, yearPrefix]);
+    const parentalUtilitiesRow = await db.prepare(
       `SELECT COALESCE(SUM(amount), 0) as total FROM parental_manual_entries WHERE user_id = ? AND category = 'Utilities' AND month LIKE ?`
-    ).get([userId, yearPrefix]).total;
+    ).get([userId, yearPrefix]);
+
+    const parentalCCSpent = Number(parentalCCRow.total);
+    const parentalManualSpent = Number(parentalManualRow.total);
     const parentalTotal = parentalCCSpent + parentalManualSpent;
 
     const lines = [];
@@ -88,8 +92,8 @@ function syncSnapshot(userId) {
       lines.push(`| Total Used | **${fmt(parentalTotal)}** (${parentalPct}%) |`);
       lines.push(`| Remaining | **${parentalRemaining >= 0 ? fmt(parentalRemaining) : `-${fmt(Math.abs(parentalRemaining))}`}** |`);
       lines.push(`| Credit Card | ${fmt(parentalCCSpent)} |`);
-      lines.push(`| Rent | ${fmt(parentalRent)} |`);
-      lines.push(`| Utilities | ${fmt(parentalUtilities)} |`);
+      lines.push(`| Rent | ${fmt(Number(parentalRentRow.total))} |`);
+      lines.push(`| Utilities | ${fmt(Number(parentalUtilitiesRow.total))} |`);
       lines.push('');
     }
     lines.push('## Month Summary');

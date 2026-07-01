@@ -13,7 +13,13 @@ const parentalBudgetRoutes = require('./routes/parentalBudget');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
@@ -31,7 +37,7 @@ app.use((err, req, res, next) => {
 
 initDb().then(() => {
   app.listen(PORT, () => {
-    console.log(`Budget API running on http://localhost:${PORT}`);
+    console.log(`Budget API running on port ${PORT}`);
   });
 }).catch(err => {
   console.error('Failed to initialize database:', err);
